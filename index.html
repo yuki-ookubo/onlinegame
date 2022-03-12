@@ -1,0 +1,329 @@
+<html>
+  <head>
+    <title>ONLINE GAME TEST</title>
+    <meta charset="utf-8">
+    <style></style>
+    <script src="https://frogcat.github.io/canvas-arrow/canvas-arrow.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+var socket;
+const WIDTH = 600;
+const HEIGHT = 600;
+const fulltime = 50;
+const bar_width = 60;
+const bar_height = 10;
+var gWidth,gHeight;
+var gScreen;
+var player;
+var cliants = [];
+var arrows = [];
+var send = {};
+var mouse_config = {
+  x : 0,
+  y : 0,
+  click : false
+};
+class KeyConfig{
+  constructor(key){
+    this.key = key;
+    this.press = false;
+    this.count = 0;
+  }
+  push(){
+    this.press = true;
+  }
+  up(){
+    this.press = false;
+    this.count = 0;
+  }
+  tick(){
+    if(this.press)this.count++;
+  }
+}
+var keys = [
+  new KeyConfig("a"),
+  new KeyConfig("d"),
+  new KeyConfig("w"),
+  new KeyConfig("s")
+];
+
+document.addEventListener('DOMContentLoaded', function(){Run()});
+function Run() {
+  socket = io.connect();
+  var myname = "";
+  socket.on("connect",function(){
+    myname = window.prompt('ユーザー名を入力してください');
+    socket.emit('setUserName', myname);
+    init();
+  });
+  socket.on("sCliants",function(data){
+    cliants = data;
+  });
+  socket.on("bornArrow",function(data){
+    arrows.push(new Arrow(data.id,data.x,data.y,data.angle));
+    console.log("nice");
+  });
+};
+function init(){
+  gScreen = document.createElement("canvas");
+  gScreen.width = WIDTH;
+  gScreen.height = HEIGHT;
+  player = new Player(300,200);
+  send.hp = player.hp;
+  send.max_hp = player.max_hp;
+
+  WmSize();
+  window.addEventListener("resize",function(){WmSize()});
+  mLoop();
+}
+function WmSize(){
+  const ct = document.getElementById("cvs");
+  ct.height = window.innerHeight - 33;
+  ct.width = window.innerWidth;
+  gWidth = ct.width;
+  gHeight = ct.height;
+  if(gWidth / gHeight > WIDTH / HEIGHT){
+      gWidth = gHeight * WIDTH / HEIGHT;
+  }else{
+      gHeight = gWidth * HEIGHT / WIDTH;
+  }
+}
+window.addEventListener("keydown",e=>{
+  for(let i = 0;i < keys.length;i++){
+    if(keys[i].key == e.key) keys[i].push();
+  }
+});
+window.addEventListener("keyup",e=>{
+  for(let i = 0;i < keys.length;i++){
+    if(keys[i].key == e.key) keys[i].up();
+  }
+});
+window.addEventListener("click",e=>{
+  mouse_config.click = true;
+  mouse_config.x = e.pageX;
+  mouse_config.y = e.pageY;
+});
+window.addEventListener("mousemove",e=>{
+  mouse_config.x = e.pageX;
+  mouse_config.y = e.pageY;
+});
+
+function mLoop(){
+  let st = new Date().getTime();
+  mTick();
+  mPaint();
+  const ct = document.getElementById("cvs");
+  const g = ct.getContext("2d");
+  g.drawImage(gScreen,0,0,gScreen.width,gScreen.height,0,0,gWidth,gHeight);
+  if(!player.die)socket.emit("sDetails",send);
+  if(send.die) player.die = true;
+  send = {};
+
+  let time = Math.max(fulltime - (new Date().getTime() - st),1);
+  setTimeout(function(){mLoop()},time);
+}
+function mTick(){
+  for(let i = 0;i < keys.length;i++){
+    keys[i].tick();
+  }
+  for(let i = 0;i < arrows.length;i++){
+    arrows[i].tick();
+  }
+  arrows = arrows.filter(e => !e.die);
+  player.tick();
+  mouse_config.click = false;
+}
+function mPaint(){
+  const g = gScreen.getContext("2d");
+  let gap = 2;
+  let nameY = -36;
+  let hpbarY = -30;
+  let reloadbarY = -16
+  g.setTransform(1,0,0,1,0,0);
+  g.fillStyle = "gray";
+  g.fillRect(0,0,WIDTH,HEIGHT);
+  g.font = "24px monospace";
+  
+  let me = cliants.filter(e => e.id == socket.id)[0] ?? player;
+  let tx = me.x;
+  let ty = me.y;
+  g.setTransform(1,0,0,1,-tx + WIDTH / 2,-ty + HEIGHT / 2);
+  g.fillStyle = "green";
+  g.fillRect(0,0,WIDTH,HEIGHT);
+  for(let i = 0;i < cliants.length;i++){
+    if(cliants[i].id == socket.id){
+      g.fillStyle = "black";
+      g.beginPath();
+
+      let cx = cliants[i].x;
+      let cy = cliants[i].y;
+      let ax = -(mouse_config.x - gWidth / 2) / Math.sqrt((mouse_config.x - gWidth / 2) ** 2 + (mouse_config.y - gHeight / 2) ** 2);
+      let ay = -(mouse_config.y - gHeight / 2) / Math.sqrt((mouse_config.x - gWidth / 2) ** 2 + (mouse_config.y - gHeight / 2) ** 2);
+      g.arrow(cx, cy, cx + 60*ax, cy + 60*ay, [0, 1, -10, 1, -10, 5]);
+      g.fill();
+      g.fillStyle = "gray";
+      g.fillRect(cliants[i].x,cliants[i].y - Player.Radius + reloadbarY,
+                  bar_width,bar_height);
+      g.fillStyle = "orange";
+      g.fillRect(cliants[i].x + gap,
+                  cliants[i].y - Player.Radius + reloadbarY + gap,
+                  (bar_width - gap * 2) / (Player.reloadSpeed * Player.gunsNumber) * player.reload , 
+                  bar_height - gap * 2
+                );
+      g.fillStyle = "gray";
+      for(let j = 1;j < Player.gunsNumber;j++){
+        g.fillRect(cliants[i].x + gap + (bar_width - gap * 2) / Player.gunsNumber * j,cliants[i].y - Player.Radius + reloadbarY,
+                  1,bar_height);
+      }
+    }
+      g.fillStyle = "yellow";
+      if(cliants[i].id != socket.id) g.fillStyle = "red";
+      g.beginPath();
+      g.arc(cliants[i].x,cliants[i].y,Player.Radius,0,Math.PI * 2,false);
+      g.fill();
+      
+      g.fillStyle = "black";
+      g.fillText(cliants[i].userName,cliants[i].x,cliants[i].y - Player.Radius + nameY);
+      
+      g.fillStyle = "gray";
+      g.fillRect(cliants[i].x,cliants[i].y - Player.Radius + hpbarY,
+                  bar_width,bar_height);
+      
+      g.fillStyle = "lawngreen";
+      g.fillRect(cliants[i].x + gap,
+                  cliants[i].y - Player.Radius + hpbarY + gap,
+                  (bar_width - gap * 2) / cliants[i].max_hp * (cliants[i].hp < 0 ? 0 : cliants[i].hp) , 
+                  bar_height - gap * 2
+                );
+  
+  }
+  for(let i = 0;i < arrows.length;i++){
+    g.beginPath();
+    g.moveTo(arrows[i].x,arrows[i].y);
+    g.lineTo(arrows[i].x + arrows[i].length * Math.cos(arrows[i].angle),arrows[i].y + arrows[i].length * Math.sin(arrows[i].angle));
+    g.strokeStyle = "black";
+    g.lineWidth = arrows[i].width;
+    g.stroke();
+  }
+  if(player.die){
+    g.setTransform(1,0,0,1,0,0);
+    console.log("asdfasdf");
+    g.fillStyle = "red";
+    g.font = "48px monospace";
+    g.fillText("GAME OVER",WIDTH / 2 - 100,HEIGHT / 2);
+  }
+}
+class Player{
+  static Radius = 16;
+  static Speed = 6;
+  static reloadSpeed = 24;
+  static gunsNumber = 3;
+  static recoverHp = 1000;
+  static recoverTime = 60;
+  static recoverInterval = 30;
+  constructor(x,y){
+    this.x = x;
+    this.y = y;
+    this.radius = Player.Radius;
+    this.speed = Player.Speed;
+    this.angle = 0;
+    this.max_hp = 10000;
+    this.hp = this.max_hp;
+    this.reload = 0;
+    this.recover = 0;
+    this.die = false;
+  }
+  tick(){
+    let x = this.x;
+    let y = this.y;
+    for(let i = 0;i < keys.length;i++){
+      if(keys[i].count){
+        if(keys[i].key == "a"){
+          x -= 5;
+        }else if(keys[i].key == "d"){
+          x += 5;
+        }else if(keys[i].key == "w"){
+          y -= 5;
+        }else if(keys[i].key == "s"){
+          y += 5;
+        }
+      }
+    }
+    if(x >= this.radius && x + this.radius < WIDTH && y >= this.radius && y + this.radius < HEIGHT){
+      this.x = x;
+      this.y = y;
+    }
+    if(this.reload < Player.reloadSpeed * Player.gunsNumber){
+      this.reload++;
+      console.log(this.reload);
+    }
+    if(mouse_config.click && this.reload >= Player.reloadSpeed){
+      this.reload -= Player.reloadSpeed;
+      let disX = mouse_config.x - gWidth / 2;
+      let disY = mouse_config.y - gHeight / 2;
+      this.angle = (Math.atan2(disY,disX) + Math.PI) % (Math.PI * 2);
+      send.arrow = {};
+      send.arrow.x = this.x;
+      send.arrow.y = this.y;
+      send.arrow.angle = this.angle;
+      send.arrow.id = socket.id;
+    }
+    for(let i = 0;i < arrows.length;i++){
+      if(arrows[i].id == socket.id) continue;
+      let ax = arrows[i].x + Arrow.Width * Math.cos(arrows[i].angle);
+      let ay = arrows[i].y + Arrow.Width * Math.sin(arrows[i].angle);
+      if((ax - this.x) ** 2 + (ay - this.y) ** 2 < (Arrow.Width + this.radius) ** 2){
+        this.hp -= 1200;
+        arrows[i].die = true;
+        send.hp = this.hp;
+        this.recover = 0;
+      }
+    }
+    if(this.hp < this.max_hp){
+      this.recover++;
+      if(this.recover >= Player.recoverTime && this.recover % Player.recoverInterval == 0){
+        this.hp += Player.recoverHp;
+        if(this.hp > this.max_hp) this.hp = this.max_hp;
+      }
+    }
+    if(this.hp <= 0){
+      this.hp = 0;
+      send.die = true;
+    }
+    send.x = this.x;
+    send.y = this.y;
+    send.hp = this.hp;
+  }
+}
+class Arrow{
+  static Width = 5;
+  static Length = 16;
+  static Speed = 32;
+  static Life = 10;
+  constructor(id,x,y,angle){
+    this.id = id;
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.speed = Arrow.Speed;
+    this.width = Arrow.Width;
+    this.length = Arrow.Length;
+    this.life = Arrow.Life;
+    this.die = false;
+  }
+  tick(){
+    if(this.die) return;
+    this.life--;
+    this.x += this.speed * Math.cos(this.angle);
+    this.y += this.speed * Math.sin(this.angle);
+    if(this.x < 0 || this.x >= WIDTH || this.y < 0 || this.y >= HEIGHT || this.life == 0){
+      this.die = true;
+    }
+  }
+}
+    </script>
+  </head>
+  <body>
+    <canvas id="cvs"></canvas>
+  </body>
+</html>
